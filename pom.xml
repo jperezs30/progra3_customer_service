@@ -44,9 +44,8 @@
             <artifactId>quarkus-jdbc-mysql</artifactId>
         </dependency>
         <dependency>
-            <groupId>com.umg.edu</groupId>
-            <artifactId>progra3_model</artifactId>
-            <version>1.0-SNAPSHOT</version>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-resteasy-reactive-jackson</artifactId>
         </dependency>
     </dependencies>
 
