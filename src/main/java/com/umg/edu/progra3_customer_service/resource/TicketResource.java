@@ -1,116 +1,88 @@
 package com.umg.edu.progra3_customer_service.resource;
 
-import java.time.LocalDateTime;
-
+import com.umg.edu.progra3_customer_service.entities.TicketEvent;
 import com.umg.edu.progra3_customer_service.service.MyCustomerList;
-import com.umg.edu.progra3_utilities.stack.MyStack;
-import com.umg.edu.progra3_utilities.tree.MyBinaryTree;
-import jakarta.ws.rs.*;
-
-import com.umg.edu.progra3_model.entities.Customer;
-import com.umg.edu.progra3_model.entities.History;
-import com.umg.edu.progra3_model.entities.Service;
+import com.umg.edu.progra3_customer_service.service.TicketDataService;
 import com.umg.edu.progra3_model.entities.Ticket;
 import com.umg.edu.progra3_model.enums.TicketStatus;
-
-import jakarta.ws.rs.core.MediaType;
-import jakarta.ws.rs.core.Response;
+import com.umg.edu.progra3_utilities.stack.MyStack;
+import com.umg.edu.progra3_utilities.tree.MyBinaryTree;
 import jakarta.enterprise.context.ApplicationScoped;
-import jakarta.inject.Inject;
 import jakarta.persistence.EntityManager;
 import jakarta.transaction.Transactional;
+import jakarta.ws.rs.*;
+import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.Response;
+import org.eclipse.microprofile.reactive.messaging.Message;
+
+import io.smallrye.reactive.messaging.rabbitmq.OutgoingRabbitMQMetadata;
+import jakarta.inject.Inject;
+import org.eclipse.microprofile.reactive.messaging.Channel;
+import org.eclipse.microprofile.reactive.messaging.Emitter;
+import java.time.LocalDateTime;
 
 @Path("/tickets")
-@Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
+@Produces(MediaType.APPLICATION_JSON)
 @ApplicationScoped
 public class TicketResource {
 
     @Inject
+    TicketDataService ticketDataService;
+
+    @Inject
     EntityManager em;
 
-    private final MyBinaryTree tree = new MyBinaryTree();
-    private final MyStack operationStack = new MyStack();
-    private final MyCustomerList customerList = new MyCustomerList();
+    @Inject
+    @Channel("ticket-events")
+    Emitter<TicketEvent> emitter;
 
     @POST
-    @Transactional
     public Response create(Ticket ticket) {
-        // Cargar customer y service desde la base de datos
-        Customer customer = em.find(Customer.class, ticket.getCustomer().getId());
-        Service service = em.find(Service.class, ticket.getService().getId());
+        TicketEvent event = new TicketEvent();
+        event.setAction(TicketEvent.ActionType.CREATE);
+        event.setTicket(ticket);
 
-        if (customer == null || service == null) {
-            return Response.status(Response.Status.BAD_REQUEST)
-                    .entity("Customer or Service not found").build();
-        }
+        OutgoingRabbitMQMetadata metadata = OutgoingRabbitMQMetadata.builder()
+            .withRoutingKey("turno.create") // personaliza esta routing key
+            .build();
 
-        ticket.setCustomer(customer);
-        ticket.setService(service);
-        ticket.setStatus(TicketStatus.PENDING);
-        ticket.setCreatedAt(LocalDateTime.now());
-        em.persist(ticket);
+        Message<TicketEvent> message = Message.of(event).addMetadata(metadata);
+        emitter.send(message);
 
-        History h = new History();
-        h.setTicket(ticket);
-        h.setEventDate(LocalDateTime.now());
-        h.setDescription("Ticket creado");
-        em.persist(h);
-
-        // Insertar en estructuras en memoria
-        tree.insertTicket(ticket);
-        System.out.println("----- Tree");
-        System.out.println(tree.toString());
-        return Response.status(Response.Status.CREATED).entity(ticket).build();
+        return Response.accepted().entity("Ticket enviado a la cola.").build();
     }
+
 
     @DELETE
     @Path("/{id}")
-    @Transactional
     public Response delete(@PathParam("id") Long id) {
-        boolean deleted = tree.deleteTicketById(id);
-        if (deleted) {
-            Ticket ticket = em.find(Ticket.class, id);
-            if (ticket != null) {
-                ticket.setStatus(TicketStatus.CANCELLED);
-                em.merge(ticket);
-
-                // Registrar en historial (opcional)
-                History h = new History();
-                h.setTicket(ticket);
-                h.setEventDate(LocalDateTime.now());
-                h.setDescription("Ticket cancelado");
-                em.persist(h);
-            }
-            System.out.println("----- Tree");
-            System.out.println(tree.toString());
-            return Response.ok("Ticket deleted").build();
-        } else {
-            System.out.println("----- Tree");
-            System.out.println(tree.toString());
-            return Response.status(Response.Status.NOT_FOUND).entity("Ticket not found").build();
-        }
+        TicketEvent event = new TicketEvent();
+        event.setAction(TicketEvent.ActionType.DELETE);        
+        event.setTicketId(id);
+         OutgoingRabbitMQMetadata metadata = OutgoingRabbitMQMetadata.builder()
+        .withRoutingKey("turno.delete")
+        .build();
+    
+        emitter.send(Message.of(event).addMetadata(metadata));
+        return Response.ok("Solicitud de eliminación enviada a cola").build();
     }
 
     @POST
     @Path("/next")
     @Transactional
     public Response attendNext(@QueryParam("service") String serviceName) {
-        Ticket next = tree.attendNext(serviceName);
-        if (next == null) {
-            return Response.status(Response.Status.NOT_FOUND).entity("No ticket available for this service").build();
-        }        
-        operationStack.push(next);
-        customerList.addTicket(next);
-
-        next.setAttendedAt(java.time.LocalDateTime.now());
-        next.setStatus(TicketStatus.ATTENDED);
-        em.merge(next);
-
-        System.out.println("----- Tree");
-        System.out.println(tree.toString());
-
-        return Response.ok(next).build();
+        System.out.println("----- TicketResource.attendNext") ;
+        System.out.println("Service: " + serviceName);
+        Ticket ticket = ticketDataService.tree.attendNext(serviceName);
+        if (ticket == null) {
+            return Response.status(Response.Status.NOT_FOUND).entity("No hay turnos pendientes").build();
+        }
+        ticket.setAttendedAt(LocalDateTime.now());
+        ticket.setStatus(TicketStatus.ATTENDED);
+        em.merge(ticket);
+        ticketDataService.history.push(ticket);
+        ticketDataService.customerList.addTicket(ticket);
+        return Response.ok(ticket).build();
     }
-
 }
