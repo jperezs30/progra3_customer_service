@@ -52,5 +52,17 @@ public class MyCustomerList {
         return head;
     }
 
+    @Override
+    public String toString() {
+        StringBuilder sb = new StringBuilder("MyCustomerList:\n");
+        Node current = head;
+        while (current != null) {
+            sb.append("Cliente ID: ").append(current.customerId).append("\n");
+            sb.append("  Tickets: ").append(current.tickets.toString()).append("\n");
+            current = current.next;
+        }
+        return sb.toString();
+    }
+
 }
 

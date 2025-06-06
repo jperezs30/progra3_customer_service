@@ -3,6 +3,7 @@ package com.umg.edu.progra3_customer_service.resource;
 import com.umg.edu.progra3_customer_service.entities.TicketEvent;
 import com.umg.edu.progra3_customer_service.service.MyCustomerList;
 import com.umg.edu.progra3_customer_service.service.TicketDataService;
+import com.umg.edu.progra3_model.entities.History;
 import com.umg.edu.progra3_model.entities.Ticket;
 import com.umg.edu.progra3_model.enums.TicketStatus;
 import com.umg.edu.progra3_utilities.stack.MyStack;
@@ -83,6 +84,13 @@ public class TicketResource {
         em.merge(ticket);
         ticketDataService.history.push(ticket);
         ticketDataService.customerList.addTicket(ticket);
+
+        History h = new History();
+        h.setTicket(ticket);
+        h.setEventDate(LocalDateTime.now());
+        h.setDescription("Ticket atendido");
+        em.persist(h);
+
         return Response.ok(ticket).build();
     }
 }
